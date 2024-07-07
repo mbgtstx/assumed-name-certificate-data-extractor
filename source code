@@ -1,0 +1,217 @@
+import cv2
+import pytesseract as pt
+import glob
+from pdf2image import convert_from_path
+import os
+import numpy as np
+from itertools import zip_longest
+import csv
+import time
+import sys
+
+pt.pytesseract.tesseract_cmd = os.path.abspath(f'tesseract-OCR/tesseract.exe')
+
+def clear(): 
+    if os.name == 'nt': 
+        _ = os.system('cls') 
+    else: 
+        _ = os.system('clear')
+
+def compute():
+    A = []
+    B = []
+    C = []
+    D = []
+    E = []
+    F = []
+    G = []
+    H = []
+    
+    def xtract_text(img):
+        img = cv2.imread(img)
+        img = cv2.resize(img, None, fx=1.2, fy=1.2, interpolation=cv2.INTER_CUBIC)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        kernel = np.ones((1, 1), np.uint8)
+        img = cv2.dilate(img, kernel, iterations=1)
+        img = cv2.erode(img, kernel, iterations=1)
+        cv2.threshold(cv2.GaussianBlur(img, (5, 5), 0), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+        cv2.threshold(cv2.bilateralFilter(img, 5, 75, 75), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+        cv2.threshold(cv2.medianBlur(img, 3), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+        cv2.adaptiveThreshold(cv2.GaussianBlur(img, (5, 5), 0), 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 2)
+        cv2.adaptiveThreshold(cv2.bilateralFilter(img, 9, 75, 75), 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 2)
+        cv2.adaptiveThreshold(cv2.medianBlur(img, 3), 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 2)
+        txt = pt.pytesseract.image_to_string(img, config='--psm 3')
+        return txt
+    
+    files = glob.glob('files/*.pdf')
+    for dFile in files:
+        pdf_images = convert_from_path(os.path.abspath(dFile.replace("\\", "/")))
+        
+        for i in range(len(pdf_images)):
+            # Save pages as images from the pdf
+            img_name = f'files/page{i}.jpg'
+            pdf_images[i].save(os.path.abspath(img_name), 'JPEG')
+            
+        try:
+            os.remove(os.path.abspath(dFile.replace("\\", "/")))
+        except:
+            pass
+                
+    files = glob.glob('files/*')
+    for dFile in files:
+        if '.pdf' not in dFile:
+            texts = xtract_text(os.path.abspath(dFile.replace("\\", "/")))
+            # print(xtract_text(os.path.abspath(dFile.replace("\\", "/"))))
+            
+            for text in texts.split("\n"):
+                if "name of business" in text.lower() or "name of the incorporated business" in text.lower() or "ness:" in text.lower() and "address" not in text.lower():
+                    if ":" in text.lower():
+                        businessName = text.split(":")[1]
+                        break
+                    elif ";" in text.lower():
+                        businessName = text.split(";")[1]
+                        break
+                    else:
+                        businessName = text
+                        break
+                else:
+                    businessName = None
+            if businessName == None:
+                if "physical address of business" in texts.lower():
+                    businessName = texts.lower().split("physical address of business")[0].split("name in which business is, or is to be, conducted")[-1].rstrip().lstrip().upper().replace("\n", "").replace(":", "")
+                else:
+                    businessName = None
+                    
+            for text in texts.split("\n"):
+                if "business address" in text.lower() or "ress:" in text.lower() or "physical address of business" in text.lower() or "business address" in text.lower():
+                    if ":" in text.lower():
+                        businessAddress = text.split(":")[1]
+                        break
+                    elif ";" in text.lower():
+                        businessAddress = text.split(";")[1]
+                        break
+                    else:
+                        businessAddress = text
+                        break
+                else:
+                    businessAddress = None
+                    
+            for text in texts.split("\n"):
+                if "city" in text.lower() or "city:" in text.lower() or "state" in text.lower():
+                    try:
+                        if ":" in text.lower():
+                            city = text.lower().split("state:")[0].replace("city", "").replace(":", "").rstrip().lstrip().upper()
+                            state= text.lower().split("state:")[1].split("code:")[0].rstrip().lstrip().upper()
+                            zipCode = text.lower().split("code:")[1].rstrip().lstrip().upper()
+                            break
+                        else:
+                            city = None
+                            state = None
+                            zipCode = None
+                            break
+                    except:
+                        city = None
+                        state = None
+                        zipCode = None
+                else:
+                    city = None
+                    state = None
+                    zipcode = None
+                    
+            for text in texts.split("\n"):
+                try:
+                    if "name/title" in text.lower() or "name/title:" in text.lower() or "name:" in text.lower() or "signature" in text.lower():
+                        if "/" in text:
+                            nameTitle = text.lower().split("name/title")[1].split("signature")[0].rstrip().lstrip().upper()
+                            break
+                        elif ":" in text.lower():
+                            nameTitle = text.lower().split(":")[1].split("signature")[0].rstrip().lstrip().upper()
+                            break
+                        else:
+                            nameTitle = text.lower().split("name")[1].split("signature")[0].rstrip().lstrip().upper()
+                            break
+                except:
+                    nameTitle = None
+                    
+                else:
+                    nameTitle = None
+                    
+            if "name/title" in texts.lower():
+                for text in texts.lower().split("name/title")[1].split("\n"):
+                    if "address" in text.lower() or "ress" in text.lower() or "residence address" in text.lower():
+                        address = text.lower().replace("address", "").rstrip().lstrip().upper()
+                        break
+                    else:
+                        address = None
+            elif "names of owners" in texts.lower():
+                for text in texts.lower().split("names of owners")[1].split("\n"):
+                    if "address" in text.lower() or "ress" in text.lower() or "residence address" in text.lower():
+                        address = text.lower().replace("address", "").rstrip().lstrip().upper()
+                        break
+                    else:
+                        address = None
+            elif "residence address" in texts.lower():
+                for text in texts.lower().split("\n"):
+                    if "residence address" in text.lower():
+                        address = text.lower().split(":")[1].rstrip().lstrip().upper()
+                        break
+                    else:
+                        address = None
+            
+            if businessName != None and businessAddress != None:
+                A.append(businessName)
+                B.append(businessAddress)
+                C.append(nameTitle)
+                D.append(address)
+                E.append(city)
+                F.append(state)
+                G.append(zipCode)
+                H.append(texts)
+                
+                d = [A, B, C, D, E, F, G, H]
+                export_data = zip_longest(*d, fillvalue = '')
+                with open("ExtractedData.csv", 'w+', encoding="utf-8-sig", newline='') as myfile:
+                    wr = csv.writer(myfile)
+                    wr.writerow(("Business Name", "Business Address", "Name/Title", "Address", "City", "State", "Zip Code", "Raw Text"))
+                    wr.writerows(export_data)
+                
+                print(f"\n[LOG]:\nBusiness Name: {businessName}\nBusiness Address: {businessAddress}\nName/Title: {nameTitle}\nAddress: {address}\nCity: {city}\nState: {state}\nZip Code: {zipCode}")
+                
+    input("\nExtraction Complete. Press any key to return: >>")
+                
+while True:
+    opt = int(input("+=================================================================+\n"
+                    "|     __  __ ____   _____ _______   _______                       |\n"
+                    "|     |  \/  |  _ \ / ____|__   __| |__   __|                     |\n"
+                    "|     | \  / | |_) | |  __   | |       | | _____  ____ _ ___      |\n"
+                    "|     | |\/| |  _ <| | |_ |  | |       | |/ _ \ \/ / _` / __|     |\n"
+                    "|     | |  | | |_) | |__| |  | |_      | |  __/>  < (_| \__ \     |\n"
+                    "|     |_|  |_|____/ \_____|  |_( )     |_|\___/_/\_\__,_|___/     |\n"
+                    "|                              |/                                 |\n"
+                    "+=================================================================+\n"
+                    "|                 >>  Document Scraper (OCR)  <<                  |\n"
+                    "+=================================================================+\n"
+                    "|                                                                 |\n"
+                    "|                        SELECT OPTION                            |\n"
+                    "|                      '''''''''''''''''                          |\n"
+                    "|       1. START BOT                                              |\n"
+                    "|       2. EXIT BOT                                               |\n"
+                    "|                                                                 |\n"
+                    "+=================================================================+\n"
+                    "|         SELECT OPTION TO START THE BOT | EXAMPLE:   >>1         |\n"
+                    "+=================================================================+\n"
+                    ">>"))
+
+    if opt == 1:
+        compute()
+    elif opt == 2:
+        sys.exit()
+    else:
+        print("\n"
+              "Incorrect option selected. Try Again.\n")
+        time.sleep(2)
+    clear()
+        
+        
+            
+
